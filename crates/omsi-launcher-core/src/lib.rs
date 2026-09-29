@@ -1510,7 +1510,7 @@ pub fn settings_from_text(text: Option<&str>) -> Value {
         v[k] = d;
     }
     // openOMSI's own: what passengers say, OMSI's route arrows, getting up from the seat
-    for (k, d) in [("pax_voices", json!("all")), ("nav_arrows", json!(false)), ("get_up", json!(false)), ("time_speed", json!("1")), ("machine_translation", json!(false)), ("shadow_casters", json!("all")), ("reflections", json!(true)), ("mouse_sens", json!(1.0)), ("graphics_api", json!("auto")), ("ctrl_off", json!("")), ("steering_linear", json!(false)), ("old_steering", json!(false)), ("ff_invert", json!(false)), ("ff_enabled", json!(true)), ("brake_hold", json!(true)), ("wheel_range", json!(900.0)), ("wheel_lock", json!(0.0)), ("fov", json!(0.0)), ("camera_collision", json!(true)), ("pedal_throttle", json!(1.0)), ("pedal_brake", json!(1.0)), ("seat_x", json!(0.0)), ("seat_y", json!(0.0)), ("seat_z", json!(0.0)), ("head_tracking", json!(false))] {
+    for (k, d) in [("pax_voices", json!("all")), ("nav_arrows", json!(false)), ("get_up", json!(false)), ("time_speed", json!("1")), ("machine_translation", json!(false)), ("shadow_casters", json!("all")), ("reflections", json!(true)), ("mouse_sens", json!(1.0)), ("graphics_api", json!("auto")), ("ctrl_off", json!("")), ("stick_curve", json!(2.0)), ("stick_smoothing", json!(0.10)), ("steering_linear", json!(false)), ("old_steering", json!(false)), ("ff_invert", json!(false)), ("ff_enabled", json!(true)), ("brake_hold", json!(true)), ("wheel_range", json!(900.0)), ("wheel_lock", json!(0.0)), ("fov", json!(0.0)), ("camera_collision", json!(true)), ("pedal_throttle", json!(1.0)), ("pedal_brake", json!(1.0)), ("seat_x", json!(0.0)), ("seat_y", json!(0.0)), ("seat_z", json!(0.0)), ("head_tracking", json!(false))] {
         v[k] = d;
     }
     // updates from the GitHub releases: looked for when the launcher starts, installed
@@ -1543,6 +1543,8 @@ pub fn settings_from_text(text: Option<&str>) -> Value {
             "graphics_api" => v[&k] = json!(match val.to_ascii_lowercase().as_str() { "vulkan" => "vulkan", "dx12" => "dx12", "gl" => "gl", _ => "auto" }),
             "shadow_casters" => v[&k] = json!(if val.eq_ignore_ascii_case("omsi") { "omsi" } else { "all" }),
             "ctrl_deadzone" => v[&k] = json!(val.parse::<f64>().unwrap_or(0.0).clamp(0.0, 0.3)),
+            "stick_curve" => v[&k] = json!(val.parse::<f64>().ok().filter(|x| x.is_finite()).map(|x| x.clamp(1.0, 3.0)).unwrap_or(2.0)),
+            "stick_smoothing" => v[&k] = json!(val.parse::<f64>().ok().filter(|x| x.is_finite()).map(|x| x.clamp(0.0, 0.3)).unwrap_or(0.10)),
             "mouse_sens" => v[&k] = json!(val.parse::<f64>().unwrap_or(1.0).clamp(0.25, 2.0)),
             "wheel_range" => v[&k] = json!(val.parse::<f64>().unwrap_or(900.0).clamp(90.0, 2880.0)),
             "wheel_lock" => v[&k] = json!(val.parse::<f64>().map(|x| if x < 45.0 { 0.0 } else { x.min(2880.0) }).unwrap_or(0.0)),
@@ -1791,6 +1793,7 @@ pub fn settings_to_text(v: &Value, old: Option<&str>) -> String {
     // what the page does not manage (keys of newer games, hand-written ones) stays as it
     // was in the file; other spellings of the keys just written go
     let mut text = text;
+    text.push_str(&format!("stick_curve={}\nstick_smoothing={}\n", f("stick_curve", 2.0).clamp(1.0, 3.0), f("stick_smoothing", 0.10).clamp(0.0, 0.3)));
     let written: Vec<String> = text.lines().filter_map(|l| l.split_once('=')).map(|(k, _)| k.trim().to_ascii_lowercase()).collect();
     for line in old.unwrap_or("").lines() {
         let t = line.trim();
@@ -2216,6 +2219,17 @@ mod tests {
         assert_eq!((v["update_check"].clone(), v["update_auto"].clone()), (json!(false), json!(true)));
         let text = settings_to_text(&v, None);
         assert!(text.lines().any(|l| l == "update_check=0") && text.lines().any(|l| l == "update_auto=1"), "{text}");
+    }
+
+    #[test]
+    fn gamepad_steering_settings_round_trip() {
+        let mut v = settings_from_text(None);
+        v["stick_curve"] = json!(2.4);
+        v["stick_smoothing"] = json!(0.15);
+        let text = settings_to_text(&v, None);
+        let restored = settings_from_text(Some(&text));
+        assert_eq!(restored["stick_curve"], json!(2.4));
+        assert_eq!(restored["stick_smoothing"], json!(0.15));
     }
 
     #[test]

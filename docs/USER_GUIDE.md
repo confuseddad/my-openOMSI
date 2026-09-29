@@ -147,6 +147,10 @@ again only when something changes; drag on it to turn the bus, scroll to zoom. I
   steers with its X axis. A wheel that a community controller mapping also makes a gamepad (a
   Logitech G29) is listed once, and *Use this device* switches any device off
   (it is then neither read nor listed as steering).
+  *Stick curve* makes the gamepad's left stick gentler near its centre while still reaching
+  full steering at its edge (1.0 is linear). *Stick smoothing* eases abrupt stick movements
+  over time (0 ms turns it off). Both are on the Game controllers tab and leave steering
+  wheels and pedals unchanged. The dead zone also applies to a gamepad stick (at least 8%).
 * **Sessions** - every game started from the launcher, with its log, a **Stop** that lets
   it save its run (SIGTERM, up to 8 s, and only a stuck game is killed) and, for a LAN
   session, the code to copy, who is playing and the chat.
@@ -189,7 +193,8 @@ under that name too; an eighth of the machine's memory when unset), `texture_com
 (BC1-BC3 on the GPU, on by default), `reflections` (the materials' reflection maps,
 `[matl_envmap]` - off, paint, chrome and glass mirror nothing), `mouse_sens` (mouse steering,
 1 = OMSI's), `steering_linear` and `old_steering` (the two steering switches above),
-`ff_invert` (force feedback the other way round), `wheel_range` (the wheel's own rotation,
+`stick_curve` (1.0–3.0, default 2.0) and `stick_smoothing` (0–0.3 seconds, default 0.10)
+for gamepad steering, `ff_invert` (force feedback the other way round), `wheel_range` (the wheel's own rotation,
 lock to lock, 900° by default) and `wheel_lock` (how far it is turned for the bus's full
 lock; 0 = the whole wheel, as OMSI), `fov` (degrees for the views from the bus; 0 = the bus's
 own cameras), `collision_objects` (walls, poles and bridges stop the bus; off is OMSI's `no_collision`

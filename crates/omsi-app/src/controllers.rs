@@ -357,6 +357,10 @@ pub struct Controllers {
     pub enabled: bool,
     /// The settings' dead zone round the centre of a set-up device's axes (0..0.3).
     pub deadzone: f32,
+    /// Shape and smooth only gamepad sticks, not steering wheels.
+    pub stick_curve: f32,
+    pub stick_smoothing: f32,
+    smoothed_stick: Option<f32>,
     /// The pedals' response curves (Settings → pedal strength; 1 = as the pedal reads).
     pub pedal_throttle: f32,
     pub pedal_brake: f32,
@@ -395,7 +399,7 @@ impl Controllers {
         for c in devices.connected() {
             log::info!("game controller: {} ({})", c.name, if cfg.iter().any(|d| names_match(&d.name, &c.name)) { "set up in gamectrler.cfg" } else if c.gamepad { "as a gamepad" } else { "not set up: its X axis steers" });
         }
-        Controllers { devices, cfg, deadzone: 0.0, pedal_throttle: 1.0, pedal_brake: 1.0, disabled: Vec::new(), ff_invert: false, ff_enabled: true, steer_gain: 1.0, enabled: true, actions: Vec::new(), announced: Vec::new(), notice: None, steer: None, ff_t: 0.0, rumble: None }
+        Controllers { devices, cfg, deadzone: 0.0, stick_curve: 2.0, stick_smoothing: 0.10, smoothed_stick: None, pedal_throttle: 1.0, pedal_brake: 1.0, disabled: Vec::new(), ff_invert: false, ff_enabled: true, steer_gain: 1.0, enabled: true, actions: Vec::new(), announced: Vec::new(), notice: None, steer: None, ff_t: 0.0, rumble: None }
     }
 
     /// A wheel or joystick steers the bus (then the arrow keys look around, as in OMSI:
@@ -405,7 +409,7 @@ impl Controllers {
     }
 
     /// Read the devices: the analog controls, and the button actions into `actions`.
-    pub fn poll(&mut self) -> Analog {
+    pub fn poll(&mut self, dt: f32) -> Analog {
         let mut out = Analog::default();
         for (name, n, down) in self.devices.poll() {
             if self.off(&name) {
@@ -416,6 +420,7 @@ impl Controllers {
             }
         }
         if !self.enabled {
+            self.smoothed_stick = None;
             return out;
         }
         // the devices set up in gamectrler.cfg first; a device the file does not know only
@@ -425,6 +430,7 @@ impl Controllers {
         let mut pads: Vec<(Option<&DeviceCfg>, Connected)> = self.devices.connected().into_iter().filter(|c| !off.iter().any(|d| names_match(d, &c.name))).map(|c| (self.cfg.iter().find(|d| names_match(&d.name, &c.name)), c)).collect();
         pads.sort_by_key(|(cfg, _)| cfg.is_none());
         let mut steer: Option<(String, f32, bool)> = None;
+        let mut stick_selected = false;
         let dz = self.deadzone.clamp(0.0, 0.3);
         for (cfg, c) in pads {
             match cfg {
@@ -441,7 +447,10 @@ impl Controllers {
                         let pedal = ((v + 1.0) * 0.5).clamp(0.0, 1.0);
                         match f {
                             Func::Steering => {
-                                let v = v * self.steer_gain;
+                                let v = if c.gamepad { stick_curve(v, 0.0, self.stick_curve) } else { v } * self.steer_gain;
+                                if out.steering.is_none_or(|old| v.abs() > old.abs()) {
+                                    stick_selected = c.gamepad;
+                                }
                                 set(&mut out.steering, v.clamp(-1.0, 1.0));
                                 if steer.is_none() {
                                     steer = Some((c.name.clone(), v.clamp(-1.0, 1.0), c.ff));
@@ -469,7 +478,10 @@ impl Controllers {
                     }
                     if let Some((_, v)) = c.axes.iter().find(|(k, _)| *k == 0) {
                         let v = v.signum() * ((v.abs() - dz.max(0.02)).max(0.0) / (1.0 - dz.max(0.02))) * self.steer_gain;
-                        out.steering.get_or_insert(v.clamp(-1.0, 1.0));
+                        if out.steering.is_none() {
+                            out.steering = Some(v.clamp(-1.0, 1.0));
+                            stick_selected = false;
+                        }
                         if steer.is_none() {
                             steer = Some((c.name.clone(), v.clamp(-1.0, 1.0), c.ff));
                         }
@@ -493,13 +505,24 @@ impl Controllers {
                     continue;
                 }
                 let x = pad.value(Axis::LeftStickX);
-                let dead = |v: f32| if v.abs() < 0.08 { 0.0 } else { v };
                 let rt = pad.button_data(gilrs::Button::RightTrigger2).map(|d| d.value()).unwrap_or(0.0);
                 let lt = pad.button_data(gilrs::Button::LeftTrigger2).map(|d| d.value()).unwrap_or(0.0);
-                out.steering.get_or_insert(dead(x));
+                if out.steering.is_none() {
+                    out.steering = Some(stick_curve(x, dz.max(0.08), self.stick_curve));
+                    stick_selected = true;
+                }
                 out.throttle.get_or_insert(crate::settings::pedal_curve(rt, self.pedal_throttle));
                 out.brake.get_or_insert(crate::settings::pedal_curve(lt, self.pedal_brake));
             }
+        }
+        if stick_selected {
+            if let Some(target) = out.steering {
+                let value = smooth_stick(self.smoothed_stick.unwrap_or(target), target, dt, self.stick_smoothing);
+                self.smoothed_stick = Some(value);
+                out.steering = Some(value);
+            }
+        } else {
+            self.smoothed_stick = None;
         }
         let before = self.steer.as_ref().filter(|s| steer.as_ref().is_some_and(|n| n.0 == s.0)).map(|s| s.1);
         self.steer = steer.map(|(name, v, ff)| (name, v, before.unwrap_or(v), ff));
@@ -574,6 +597,20 @@ impl Controllers {
     pub fn any(&self) -> bool {
         !self.devices.connected().is_empty()
     }
+}
+
+/// Rescale the dead zone so there is no jump at its edge; the full stick still gives full lock.
+fn stick_curve(value: f32, deadzone: f32, exponent: f32) -> f32 {
+    let v = value.clamp(-1.0, 1.0);
+    let d = deadzone.clamp(0.0, 0.3);
+    v.signum() * ((v.abs() - d).max(0.0) / (1.0 - d)).powf(exponent.clamp(1.0, 3.0))
+}
+
+/// A time-based filter gives the same steering feel at different frame rates.
+fn smooth_stick(previous: f32, target: f32, dt: f32, seconds: f32) -> f32 {
+    let tau = seconds.clamp(0.0, 0.3);
+    let alpha = if tau == 0.0 { 1.0 } else { 1.0 - (-dt.max(0.0) / tau).exp() };
+    previous + (target - previous) * alpha
 }
 
 /// The force on a wheel standing at `x` (-1 full left .. 1), `x0` the frame before: -1..1.
@@ -702,6 +739,26 @@ fn code_button(code: u32) -> Option<usize> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn stick_is_gentle_near_centre_and_reaches_full_lock() {
+        let curve = super::stick_curve;
+        assert_eq!(curve(0.08, 0.08, 2.0), 0.0);
+        assert_eq!(curve(-0.08, 0.08, 2.0), 0.0);
+        assert!(curve(0.5, 0.08, 2.0) < 0.25);
+        assert_eq!(curve(1.0, 0.08, 2.0), 1.0);
+        assert_eq!(curve(-1.0, 0.08, 2.0), -1.0);
+        assert_eq!(curve(0.5, 0.0, 1.0), 0.5);
+    }
+
+    #[test]
+    fn smoothing_does_not_depend_on_frame_rate() {
+        let one = super::smooth_stick(0.0, 1.0, 0.10, 0.10);
+        let two = super::smooth_stick(super::smooth_stick(0.0, 1.0, 0.05, 0.10), 1.0, 0.05, 0.10);
+        assert!((one - two).abs() < 1e-6);
+        assert!(one > 0.6 && one < 0.7);
+        assert_eq!(super::smooth_stick(0.0, 1.0, 0.01, 0.0), 1.0);
+    }
+
     #[test]
     fn names() {
         assert!(super::names_match("Logitech G25 Racing Wheel USB", "Logitech G25 Racing Wheel"));

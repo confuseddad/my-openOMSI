@@ -876,7 +876,7 @@ fn game_controllers(l: &mut Launcher, body: Rect) {
     let inner = l.ui.heading(Rect::new(left.x + 18.0, left.y + 14.0, left.w - 36.0, left.h - 28.0), "Devices", Some("sports_esports"));
     let mut add: Option<String> = None;
     let mut sel = pv.selected;
-    let list_r = Rect::new(inner.x - 6.0, inner.y, inner.w + 12.0, inner.h - 108.0);
+    let list_r = Rect::new(inner.x - 6.0, inner.y, inner.w + 12.0, inner.h - 252.0);
     let offs: Vec<String> = l.state.settings.get("ctrl_off").and_then(|v| v.as_str()).unwrap_or("").split('|').map(str::to_string).filter(|s| !s.is_empty()).collect();
     {
         let ui = &mut l.ui;
@@ -924,11 +924,21 @@ fn game_controllers(l: &mut Launcher, body: Rect) {
         // a new device starts with the assistant
         pv.wizard = Some(Wizard { step: 0, rest: [None; 8], at: Vec::new(), error: None });
     }
-    // the dead zone (a setting of the game's)
-    let dz_r = Rect::new(inner.x, inner.bottom() - 98.0, inner.w, 34.0);
+    // Stick response applies to gamepad steering, not physical wheels or pedals.
+    let dz_r = Rect::new(inner.x, inner.bottom() - 242.0, inner.w, 34.0);
     let mut dz = l.state.settings.get("ctrl_deadzone").and_then(|x| x.as_f64()).unwrap_or(0.0) as f32;
     if l.ui.slider("pad-dz", dz_r, &mut dz, 0.0, 0.3, 0.01, "Dead zone", &|v| format!("{:.0} %", v * 100.0)) {
         l.state.settings["ctrl_deadzone"] = json!(dz);
+        l.state.settings_dirty = 0.3;
+    }
+    let mut curve = l.state.settings.get("stick_curve").and_then(|x| x.as_f64()).unwrap_or(2.0) as f32;
+    if l.ui.slider("pad-curve", Rect::new(inner.x, inner.bottom() - 194.0, inner.w, 34.0), &mut curve, 1.0, 3.0, 0.1, "Stick curve", &|v| if (v - 1.0).abs() < 0.01 { "Linear".into() } else { format!("{v:.1}") }) {
+        l.state.settings["stick_curve"] = json!(curve);
+        l.state.settings_dirty = 0.3;
+    }
+    let mut smooth = l.state.settings.get("stick_smoothing").and_then(|x| x.as_f64()).unwrap_or(0.10) as f32;
+    if l.ui.slider("pad-smooth", Rect::new(inner.x, inner.bottom() - 146.0, inner.w, 34.0), &mut smooth, 0.0, 0.3, 0.01, "Stick smoothing", &|v| if v < 0.005 { "Off".into() } else { format!("{:.0} ms", v * 1000.0) }) {
+        l.state.settings["stick_smoothing"] = json!(smooth);
         l.state.settings_dirty = 0.3;
     }
     let save_r = Rect::new(inner.x, inner.bottom() - 48.0, inner.w, 40.0);
