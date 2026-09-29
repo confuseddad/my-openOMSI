@@ -447,6 +447,8 @@ impl ApplicationHandler for App {
                 let hwnd = self.window.as_deref().and_then(crate::controllers::window_handle);
                 let ctl = self.controllers.get_or_insert_with(|| crate::controllers::Controllers::new(&self.args.root, hwnd));
                 ctl.deadzone = self.settings.ctrl_deadzone;
+                ctl.stick_curve = self.settings.stick_curve;
+                ctl.stick_smoothing = self.settings.stick_smoothing;
                 ctl.pedal_throttle = self.settings.pedal_throttle;
                 ctl.pedal_brake = self.settings.pedal_brake;
                 ctl.ff_invert = self.settings.ff_invert;
@@ -455,7 +457,7 @@ impl ApplicationHandler for App {
                 if ctl.disabled.is_empty() && !self.settings.ctrl_off.is_empty() {
                     ctl.disabled = self.settings.ctrl_off.split('|').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
                 }
-                let analog = ctl.poll();
+                let analog = ctl.poll(dt);
                 let actions = std::mem::take(&mut ctl.actions);
                 if let Some(n) = ctl.notice.take() {
                     self.service_msg = Some((n, 8.0));
